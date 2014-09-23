@@ -1,0 +1,91 @@
+#!/usr/bin/python
+#  This tiny program is a watchdog for websites that will post the results to AWS CloudWatch
+#  for monitoring.  This assumes that you already have servers on AWS EC2, and you are running
+#  websites.  
+#
+# To run this watchdog program you'll need to:
+#    1. Set up AWS CloudWatch
+#    2. Install python boto
+#    3. Create an account with access to CloudWatch (preferably limited ONLY to CloudWatch)
+#    4. Get a list of your servers (e.g. ec2-describe-instances | grep TAG | cut -f 3,5 -s )
+#    5. For each server, find a stable URL and grab a small snippet of that page
+#    6. Configure each of the constant elements below
+#    7. Run the program and see if it is posting to CloudWatch
+#    8. Monitor the log file if needed (e.g. tail -f /var/log/httpd/website_watchdog.log)
+#    9. If all is good, set up any alarms in CloudWatch for these custom metrics
+#
+#  Best of luck!
+
+import os, sys, httplib, logging
+from urlparse import urlparse
+import boto.ec2
+
+# Configure this to a rotated log file
+LOG_FILE = '/var/log/httpd/website_watchdog.log'
+
+# Configure your keys here
+AWS_ACCESS_KEY = 'XXX'
+AWS_SECRET_KEY = 'YYY'
+
+# Configure the name of the custom cloudwatch metric
+CW_METRIC_NAME = 'webserver-response'
+
+#  All the servers should be listed here with the elements:
+#     Server ID, Server Name, URL, Snippet
+aSERVERS = [
+    ( 'i-1111111', 'Production', 'https://www.yourdomain.com/page', 'some sample text in page'),
+    ]
+
+oBotoEc2 = boto.connect_cloudwatch(aws_access_key_id=AWS_ACCESS_KEY, aws_secret_access_key=AWS_SECRET_KEY)
+
+def postCloudWatch (sServerId, sServerDesc, sStatus):
+    sNamespace = 'EC2: ' + sServerDesc
+    logging.info('Posting to EC2 CloudWatch: namespace: %s, metric: %s, instance: %s, value: %s' %
+                 (sNamespace, CW_METRIC_NAME, sServerId, sStatus))
+    # put_metric_data(namespace, name, value=None, timestamp=None, unit=None, dimensions=None, statistics=None)
+    oBotoEc2.put_metric_data(sNamespace, CW_METRIC_NAME, value=sStatus,
+                             timestamp=None, unit='Count', dimensions= { 'InstanceId' : [ sServerId ] } )
+                                 
+
+def getSiteContent (sUrl):
+    try: 
+        oUrl = urlparse(sUrl)
+        if (oUrl.scheme == 'https'):
+            oConnect = httplib.HTTPConnection(oUrl.netloc)
+        else:
+            oConnect = httplib.HTTPSConnection(oUrl.netloc)
+        oConnect.request('GET', oUrl.path)
+        oResponse = oConnect.getresponse()
+        if (oResponse.status in [ 200, 302 ] ):
+            mReturn = oResponse.read()
+        else:
+            logging.error('URL did not return valid response: %s - status: %d' % (sUrl, oResponse.status))
+            mReturn = False
+        oConnect.close()
+        return mReturn
+    except:
+        logging.error('Failed getting response from URL: ' + sUrl)
+        oConnect.close()
+        return False
+
+def validateSite (sId, sServerDesc, sUrl, sSnippet):
+    logging.info('Validating site: %s - %s - %s - %s' % (sId, sServerDesc, sUrl, sSnippet))
+    sContent = getSiteContent(sUrl)
+    if (sContent != False and sSnippet in sContent):
+        # logging.info('Site appears valid - match found in: ' + sUrl)
+        postCloudWatch(sId, sServerDesc, '1')
+    else:
+        if (sContent != False):
+            logging.error('No match found in URL: %s  Match:%s' % (sUrl, sSnippet))
+        postCloudWatch(sId, sServerDesc, '0')
+    
+def main():
+    logging.basicConfig(level=logging.INFO, filename=LOG_FILE, 
+            format='%(asctime)s %(levelname)s: %(message)s', 
+            datefmt='%Y-%m-%d %H:%M:%S')
+
+    for sId, sServerDesc, sUrl, sSnippet in aSERVERS:
+        validateSite(sId, sServerDesc, sUrl, sSnippet)
+
+if __name__ == '__main__':
+    main()
