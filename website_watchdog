@@ -1,20 +1,4 @@
 #!/usr/bin/python
-#  This tiny program is a watchdog for websites that will post the results to AWS CloudWatch
-#  for monitoring.  This assumes that you already have servers on AWS EC2, and you are running
-#  websites.  
-#
-# To run this watchdog program you'll need to:
-#    1. Set up AWS CloudWatch
-#    2. Install python boto
-#    3. Create an account with access to CloudWatch (preferably limited ONLY to CloudWatch)
-#    4. Get a list of your servers (e.g. ec2-describe-instances | grep TAG | cut -f 3,5 -s )
-#    5. For each server, find a stable URL and grab a small snippet of that page
-#    6. Configure each of the constant elements below
-#    7. Run the program and see if it is posting to CloudWatch
-#    8. Monitor the log file if needed (e.g. tail -f /var/log/httpd/website_watchdog.log)
-#    9. If all is good, set up any alarms in CloudWatch for these custom metrics
-#
-#  Best of luck!
 
 import os, sys, httplib, logging
 from urlparse import urlparse
