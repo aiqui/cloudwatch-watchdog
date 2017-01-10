@@ -1,0 +1,15 @@
+[cloudwatch]
+namespace:  EC2: MY SERVER
+access_id:  ADD-ACCESS-KEY-HERE  ;;; leave blank if using an EC2 role
+secret_key: ADD-SECRET-KEY-HERE  ;;; leave blank if using an EC2 role
+
+;;; Each disk value is a metric name and a directory
+[disk-metrics]
+disk-usage-root:     /
+disk-usage-content1: /files
+disk-usage-content2: /files2
+
+[memory-metrics]
+swap-metric: memory-swap-usage
+ram-metric:  memory-ram-usage
+

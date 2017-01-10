@@ -1,0 +1,116 @@
+#!/usr/bin/env python
+import sys
+import re
+import os
+import boto.ec2
+from boto.utils import get_instance_metadata
+import ConfigParser
+
+# Configuration file is required in the same directory as this program
+oConfig = ConfigParser.RawConfigParser()
+sConfigPath = os.path.dirname(os.path.realpath(sys.argv[0])) + '/config.ini'
+if os.path.isfile(sConfigPath) == False:
+    sys.exit('Missing configuration file: ' + sConfigPath)
+oConfig.read(sConfigPath)
+
+# Get the configuration elements
+AWS_ACCESS_ID     = oConfig.get('cloudwatch', 'access_id')
+AWS_SECRET_KEY    = oConfig.get('cloudwatch', 'secret_key')
+METRICS_NAMESPACE = oConfig.get('cloudwatch', 'namespace')
+MONITOR_DISKS     = oConfig.items('disk-metrics')
+RAM_METRIC        = oConfig.get('memory-metrics', 'ram-metric')
+SWAP_METRIC       = oConfig.get('memory-metrics', 'swap-metric')
+
+
+def getDiskUsage(sPath):
+    """Return disk-usage percentage for a given directory"""
+    oStat  = os.statvfs(sPath)
+    iTotal = (oStat.f_blocks * oStat.f_frsize)
+    iUsed  = (oStat.f_blocks - oStat.f_bfree) * oStat.f_frsize
+    try:
+        fPercent = (float(iUsed) / iTotal) * 100
+    except ZeroDivisionError:
+        fPercent = 0
+    return round(fPercent, 1)
+
+
+def getAllDiskUsage(aDiskConfig):
+    """Get the disk usage for multiple directories"""
+    aUsage = []
+    for aDisk in aDiskConfig:
+        sName, sDir = aDisk
+        iUsage = getDiskUsage(sDir)
+        aUsage.append((sName, sDir, iUsage))
+    return aUsage
+
+
+def collectMemoryUsage():
+    """Return the memory usage for the current server"""
+    aMemInfo = {}
+    rePattern = re.compile('([\w\(\)]+):\s*(\d+)(:?\s*(\w+))?')
+    with open('/proc/meminfo') as fp:
+        for sLine in fp:
+            match = rePattern.match(sLine)
+            if match:
+                aMemInfo[match.group(1)] = float(match.group(2))
+    return aMemInfo
+
+
+def sendMetrics(oBoto, sInstanceId, aMetrics, sNameSpace, sUnit):
+    """Send metrics to CloudWatch - Metrics are sent in key-value pairs"""
+    aKeys   = aMetrics.keys()
+    aValues = aMetrics.values()
+    print "Setting metric - namespace:%s  server:%s  name:%s  value:%s  unit:%s" % \
+        (sNameSpace, sInstanceId, aKeys[0], aValues[0], sUnit)
+    oBoto.put_metric_data(sNameSpace, aKeys, aValues, unit=sUnit, dimensions={"InstanceId": sInstanceId})
+
+
+def getBoto (sAccessId, sSecretKey):
+    """"Get the Boto connection, using the default role if the ID and Key are not set"""
+    if re.search('\w', sAccessId) and re.search('\w', sSecretKey):
+        oBoto = boto.connect_cloudwatch(aws_access_key_id=sAccessId, aws_secret_access_key=sSecretKey)
+    else:
+        oBoto = boto.connect_cloudwatch()
+    return oBoto
+
+
+def getMemoryUsage(sRamMetric, sSwapMetric):
+    """Get the memory usage for the server"""
+    
+    aMemInfo = collectMemoryUsage()
+
+    # Total free memory = free + buffers + cached
+    iMemFree = aMemInfo['MemFree'] + aMemInfo['Buffers'] + aMemInfo['Cached']
+    iMemUsed = aMemInfo['MemTotal'] - iMemFree
+    
+    if aMemInfo['SwapTotal'] != 0 :
+        iSwapUsed    = aMemInfo['SwapTotal'] - aMemInfo['SwapFree'] - aMemInfo['SwapCached']
+        fSwapPercent = iSwapUsed / aMemInfo['SwapTotal'] * 100
+    else:
+        fSwapPercent = 0.0
+
+    return [ ('memory-ram-usage', round (iMemUsed / aMemInfo['MemTotal'] * 100, 1)),
+             ('memory-swap-usage', round(fSwapPercent, 1)) ]
+
+
+def getInstanceId():
+    """Get the instance ID for the current server"""
+    aMetaData = get_instance_metadata()
+    return aMetaData['instance-id']
+
+
+# Primary execution
+if __name__ == '__main__':
+
+    sInstanceId = getInstanceId()
+    oBoto       = getBoto(AWS_ACCESS_ID, AWS_SECRET_KEY)
+
+    for aUsage in getAllDiskUsage(MONITOR_DISKS):
+        sMetricName, sDir, fPercent = aUsage
+        print "Disk usage -   %-25s percentage: %0.1f%%   directory: %s" % (sMetricName, fPercent, sDir)
+        sendMetrics(oBoto, sInstanceId, { sMetricName: fPercent }, METRICS_NAMESPACE, 'Percent')
+
+    for aUsage in getMemoryUsage(RAM_METRIC, SWAP_METRIC):
+        sMetricName, fPercent = aUsage
+        print "Memory usage - %-25s percentage: %0.1f%%" % (sMetricName, fPercent)
+        sendMetrics(oBoto, sInstanceId, { sMetricName: fPercent }, METRICS_NAMESPACE, 'Percent')

@@ -1,21 +1,49 @@
+There are two Python programs here for monitoring systems with custom
+parameters in CloudWatch:
+
+      1. monitor_server - monitor for memory and disk usage 
+      2. website_watchdog - monitor HTTP content 
+
+To prepare for these to work:
+   1. set up AWS CloudWatch
+   2. Install Python boto, e.g. yum install python27-boto
+
+
+Monitor Server Program
+
+This program will:
+     - Run on a Linux server, preferably AWS Linux AMI
+     - Written in Python using AWS Boto library
+     - Get the RAM usage
+     - Get the swap usage
+     - Get the disk usage for a variable number of attached storage devices
+     - Store each of these values into CloudWatch
+     - Use a simple configuration file
+     - Optionally run using the EC2 role instead of AWS access ID and secret key
+
+To run this program:
+   1. Copy config.ini.template to config.ini
+   2. Add a custom namespace for the server you are monitoring
+   3. If not using an EC2 role, add the access ID and secret key
+   4. Modify the disk metrics for each of the disks to monitor
+   5. Run on the server to test
+   6. Once working, run this in a cron job
+
+
+
+Website Watchdog
+
 This tiny program is a watchdog for websites that will post the
 results to AWS CloudWatch for monitoring and alarms.  This assumes
-that you already have servers on AWS EC2, and you are running websites
-that are available and containing something constant that can be
+the website is available and containing something constant that can be
 matched.
 
 To run this watchdog program you'll need to:
-    1. Set up AWS CloudWatch
-    2. Install python boto, which is widely available
-    3. Create an account with access to CloudWatch (preferably 
-       limited ONLY to CloudWatch)
-    4. Get a list of your servers
-       (e.g. ec2-describe-instances | grep TAG | cut -f 3,5 -s )
-    5. For each server, find a stable URL and grab a small snippet of that page
-    6. Configure each of the constant elements below
-    7. Run the program and see if it is posting correctly to CloudWatch
-    8. Monitor the log file if needed
+    - Get a list of your servers IDs
+    - For each server to monitor , find a stable URL and grab a small snippet of that page
+    - Configure each of the constant elements below
+    - Run the program and see if it is posting correctly to CloudWatch
+    - Monitor the log file if needed
        (e.g. tail -f /var/log/httpd/website_watchdog.log)
-    9. If all is good, set up any alarms in CloudWatch for these custom metrics
+    - If all is good, set up any alarms in CloudWatch for these custom metrics
 
-Best of luck!
